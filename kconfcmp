@@ -1,0 +1,118 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use File::Basename;
+use File::Path;
+use FindBin qw($Bin);
+use Cwd;
+use Data::Dumper;
+use Carp;
+require "$Bin/kconfread.pm";
+
+$id                         = qr'[a-zA-Z0-9\._]+';
+
+sub readfile {
+    my ($in) = @_;
+    ::usage(\*STDOUT) if (length($in) == 0) ;
+    open IN, "$in" or die "Reading \"$in\":".$!;
+    local $/ = undef;
+    $m = <IN>;
+    close IN;
+    return $m;
+}
+
+Getopt::Long::Configure(qw(bundling));
+GetOptions(\%OPT,qw{
+    quiet|q+
+    verbose|v+
+    dbgtrans
+} ,@g_more) or usage(\*STDERR);
+
+$action = shift @ARGV;
+
+if ($action eq "diff") {
+    die("kconfcmp diff <file1> <file2>\n") if (scalar(@ARGV) < 2);
+    my $a = readfile($ARGV[0]);
+    my $b = readfile($ARGV[1]);
+    $ah = parseconf($a);
+    $bh = parseconf($b);
+    dumpkconf($ah);
+}
+elsif ($action eq "read") {
+    die("kconfcmp read <dir> \n") if (scalar(@ARGV) < 1);
+    $ah = parsekconf($a);
+    
+}
+
+sub conftyp {
+    my ($a,$typ,$value) = @_;
+    my $v = {}; my $w = {};
+    foreach my $k (sort(keys %$a)) {
+	if($$a{$k}{'type'} =~ /$typ/ && 
+	   (( !defined($value)) || $$a{$k}{'value'} eq $value)) {
+	    $$v{$k} = $$a{$k};
+	} else {
+	    $$w{$k} = $$a{$k}
+	}
+    }
+    return ($v,$w);
+}
+
+sub dumpkconf() {
+    my ($a) = @_;
+    my ($b,$a) = conftyp($a,'undef');
+    print("######### undef ########\n");
+    dumpconf($b);
+    print("######### enable module ########\n");
+    my ($b,$a) = conftyp($a,'enable','m');
+    dumpconf($b);
+    print("######### enable y ########\n");
+    my ($b,$a) = conftyp($a,'enable','y');
+    dumpconf($b);
+    print("######### enable n ########\n");
+    my ($b,$a) = conftyp($a,'enable','n');
+    dumpconf($b);
+    print("######### value ########\n");
+    my ($b,$a) = conftyp($a,'num|str');
+    dumpconf($b);
+    print("######### rest ########\n");
+    dumpconf($a);
+}
+
+sub dumpconf() {
+    my ($a) = @_;
+    my @k = sort(keys %$a);
+    foreach my $k (@k) {
+	print("CONF_$k ".$$a{$k}{'value'}."\n");
+    }
+}
+
+sub parseconf() {
+    my ($a) = @_;
+    my %a = ();
+    foreach my $l (split("\n", $a)) {
+	next if (length($l) == 0);
+	my $n = undef;
+	if ($l =~ /# CONFIG_($id) is not set/) {
+	    $n = $1; $v = { 'type' => 'undef' };
+	}
+	elsif ($l =~ /^CONFIG_($id)=([nym])/) {
+	    $n = $1; $v = { 'type' => 'enable', 'value' => $2 };
+	}
+	elsif ($l =~ /^CONFIG_($id)=([\-0-9]+)/) {
+	    $n = $1; $v = { 'type' => 'num', 'value' => $2 };
+	}
+	elsif ($l =~ /^CONFIG_($id)=("[^"]*")/) {
+	    $n = $1; $v = { 'type' => 'str', 'value' => $2 };
+	}
+	elsif ($l =~ /^#/) {
+	}
+	elsif ($l =~ /^[\s]*$/) {
+	}
+	else {
+	    die("Cannot parse '$l'");
+	}
+	$a{$n} = $v if (defined($n)) ;
+    }
+    return \%a;
+}
