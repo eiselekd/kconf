@@ -515,7 +515,7 @@ sub parsekconf {
     die("open if\n") if (!(scalar(@{$$ctx{'if'}}) == 0));
     my %k = ();
     map { $k{$$_{'id'}} = $_; } @{$ctx{'config'}};
-
+    
     foreach my $k (sort(keys(%k))) {
 	my ($n) = ($k);
 	my $c = $k{$n};
