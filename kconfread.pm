@@ -290,7 +290,7 @@ sub slurpone {
     my @r = ();
     while (scalar(@$a)) {
 	last if ($$a[0] =~ /^[a-zA-Z]/ &&
-		 ! ($$a[0] =~ /^depends/  ||
+		 ! ($$a[0] =~ /^depends/  ||  # fix "depends" and "tristate" definitions without trailing whitespace
 		    $$a[0] =~ /^tristate/
 		    
 		 ));
