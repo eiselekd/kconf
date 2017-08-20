@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
-$RE_string =                     qr{"((?:\\.|[^\\"])*)"};
-$RE_string_one =                 qr{'((?:\\.|[^\\'])*)'}; #"
+$RE_string =     qr{"((?:\\.|[^\\"])*)"};
+$RE_string_one = qr{'((?:\\.|[^\\'])*)'}; #"
 
 sub splitexpr {
     my ($e) = @_;
@@ -256,13 +256,16 @@ sub parseguart {
 }
 
 sub slurpone {
-    my ($ctx,$a) = @_;
+    my ($ctx,$a,$ctxone) = @_;
+    $$ctxone{'depends'} = [];
+    $$ctxone{'default'} = [];
+    $$ctxone{'select'} = [];
     my @r = ();
     while (scalar(@$a)) {
 	last if ($$a[0] =~ /^[a-zA-Z]/ &&
 		 ! ($$a[0] =~ /^depends/  ||
 		    $$a[0] =~ /^tristate/
-
+		    
 		 ));
 	push(@r, shift(@$a));
     }
@@ -274,13 +277,21 @@ sub slurpone {
 
 	if ($r =~ /^int\s+(.*)$/ ||
 	    $r =~ /^int\s*$/) {
+	    my ($n) = $1;
+	    die ("type already defined : >$$ctxone{'typ'}< ") if (defined($$ctxone{'typ'}) && !($$ctxone{'typ'} eq 'int'));
+	    $$ctxone{'typ'} = 'int';
+	    $$ctxone{'id'} = $n if (length($n));
+	    
 	    my ($val) = ($1);
 	    my $e = parseexpr($ctx, $val);
 	    print ("  # expr-int: ".exprtostr($e)."\n");
-
 	}
 	elsif ($r =~ /^hex\s+(.*)$/ ||
 	       $r =~ /^hex\s*$/) {
+	    my ($n) = $1;
+	    die ("type already defined : >$$ctxone{'typ'}< ") if (defined($$ctxone{'typ'}) && !($$ctxone{'typ'} eq 'hex'));
+	    $$ctxone{'typ'} = 'hex';
+	    $$ctxone{'id'} = $n if (length($n));
 	    my ($val) = ($1);
 	    my $e = parseexpr($ctx, $val);
 	    print ("  # expr-hex: ".exprtostr($e)."\n");
@@ -288,38 +299,55 @@ sub slurpone {
 	}
 	elsif ($r =~ /^bool\s+(.*)$/ ||
 	       $r =~ /^bool\s*$/) {# note: might follow by "if ...", i.e. bool "a" if flag
+	    my ($n) = $1;
+	    die ("type already defined : >$$ctxone{'typ'}< ") if (defined($$ctxone{'typ'}) && !($$ctxone{'typ'} eq 'bool'));
+	    $$ctxone{'typ'} = 'bool';
 	    my ($val) = ($1);
+	    $$ctxone{'id'} = $n if (length($n));
 	    my $e = parseexpr($ctx, $val);
 	    print ("  # expr-bool: ".exprtostr($e)."\n");
 
 	}
 	elsif ($r =~ /^tristate\s+(.*)$/ ||
 	       $r =~ /^tristate\s*$/) {
+	    my ($n) = $1;
+	    die ("type already defined : >$$ctxone{'typ'}< ") if (defined($$ctxone{'typ'}) && !($$ctxone{'typ'} eq 'tristate'));
+	    $$ctxone{'typ'} = 'tristate';
+	    $$ctxone{'id'} = $n if (length($n));
 	    my ($val) = ($1);
 	    my $e = parseexpr($ctx, $val);
 	    print ("  # expr-tristate: ".exprtostr($e)."\n");
 
 	}
-	elsif ($r =~ /^string\s+(.*)/ || $r =~ /^string\s*$/) {
+	elsif ($r =~ /^string\s+(.*)/ || 
+	       $r =~ /^string\s*$/) {
+	    my ($n) = $1;
+	    die ("type already defined : >$$ctxone{'typ'}< ") if (defined($$ctxone{'typ'}) && !($$ctxone{'typ'} eq 'string'));
+	    $$ctxone{'typ'} = 'string';
+	    $$ctxone{'id'} = $n if (length($n));
 	    my ($val) = ($1);
 	    my $e = parseexpr($ctx, $val);
 	    print ("  # expr-string: ".exprtostr($e)."\n");
 	}
 	elsif ($r =~ /^prompt(.*)/) {
+	    $$ctxone{'id'} = $1;
 	}
 
 	elsif ($r =~ /^default(.*)/) {
 	    my ($id) = ($1);
 	    my $e = parseexpr($ctx, $id);
+	    push(@{$$ctxone{'default'}}, $e);
 	}
 	elsif ($r =~ /^depends\s+on\s+(.*)$/) {
 	    my $e = parseexpr($ctx, $1);
-	    print ("  # expr: ".exprtostr($e)."\n");
+	    print ("  # expr-depends: ".exprtostr($e)."\n");
+	    push(@{$$ctxone{'depends'}}, $e);
 	}
 	elsif ($r =~ /^select(.*)$/) {
 	    my ($g) = ($1);
 	    my $e = parseexpr($ctx, $g);
 	    print ("  # expr-select: ".exprtostr($e)."\n");
+	    push(@{$$ctxone{'select'}}, $e);
 	}
 
 	elsif ($r =~ /^option\s+($id)=($id)(.*)$/ ||
@@ -338,12 +366,12 @@ sub slurpone {
 	elsif ($r =~ /^def_bool\s+(.*)$/) {
 	    my ($id) = ($1);
 	    my $e = parseexpr($ctx, $id);
-	    print ("  # expr: ".exprtostr($e)."\n");
+	    print ("  # expr-def-bool: ".exprtostr($e)."\n");
 	}
 	elsif ($r =~ /^def_tristate\s+(.*)/) {
 	    my ($id) = ($1);
 	    my $e = parseexpr($ctx, $id);
-	    print ("  # expr: ".exprtostr($e)."\n");
+	    print ("  # expr-def-tristate: ".exprtostr($e)."\n");
 	}
 	elsif ($r =~ /^visible/) {
 	}
@@ -368,7 +396,6 @@ sub slurpone {
 
 sub loadkconf {
     my ($ctx,$fn) = @_;
-    print(":::$fn\n");
     my $a = readfile($fn);
     $a =~ s/[\\]\n//g;
     #$a =~ s/[#][^\n]+//g;
@@ -378,32 +405,47 @@ sub loadkconf {
 	next if ($l =~ /^\s*$/);
 
 	print (" Parse '$l'\n");
-
-	if ($l =~ /^config ($id)$/) {
-	    my $o = slurpone($ctx,\@a);
+	
+	if ($l =~ /^config\s+($id)\s*$/ ||
+	    $l =~ /^config\s*$/) {
+	    my ($n) = ($1);
+	    my $c = {'id' => $n, 'options' => []};
+	    my $o = slurpone($ctx,\@a, $c);
+	    push(@{$$ctx{'config'}},$c);
+	    
 	} elsif ($l =~ /^\s*source\s+"(.+)"$/ || $l =~ /^source\s+(.+)$/) {
 	    my ($inc) = ($1);
 	    loadkconf($ctx, $$ctx{'rootdir'}."/".$inc);
 
 	} elsif ($l =~ /^menu\s+"(.+)"$/) {
-	    my $o = slurpone($ctx,\@a);
-
+	    my ($n) = ($1);
+	    my $c = {'id' => $n, 'options' => []};
+	    my $o = slurpone($ctx,\@a,$c);
+	    push(@{$$ctx{'menues'}},$c);;
+	    
 	} elsif ($l =~ /^endmenu/) {
+	    die("Endmenue without menue in '$fn'\n") if (scalar(@{$$ctx{'menues'}}) == 0);
+	    pop(@{$$ctx{'menues'}});;
+	    
 	} elsif ($l =~ /^menuconfig/) {
 	    my $o = slurpone($ctx,\@a);
 
 	} elsif ($l =~ /^choice/) {
-	    my $o = slurpone($ctx,\@a);
-
-	} elsif ($l =~ /^config/) {
-	    my $o = slurpone($ctx,\@a);
+	    my $c = {'id' => $n, 'options' => []};
+	    my $o = slurpone($ctx,\@a,$c);
+	    push(@{$$ctx{'choice'}},$c);;
 
 	} elsif ($l =~ /^endchoice/) {
+	    die("Endchoice without choice in '$fn'\n") if (scalar(@{$$ctx{'choice'}}) == 0);
+	    pop(@{$$ctx{'choice'}});;
+	    
 	} elsif ($l =~ /^if/) {
-	    #my $o = slurpone($ctx,\@a);
- 	    my $e = parseguart($ctx, $l);
-
+	    my $e = parseguart($ctx, $l);
+	    push(@{$$ctx{'if'}},$e);;
+	    
 	} elsif ($l =~ /^endif/) {
+	    die("endif without if\n") if (scalar(@{$$ctx{'if'}}) == 0);
+	    
 	} elsif ($l =~ /^\s*#.*/) {
 	} elsif ($l =~ /^\s*comment/) {
 	    my $o = slurpone($ctx,\@a);
@@ -413,13 +455,18 @@ sub loadkconf {
     }
 }
 
-
 sub parsekconf {
     my ($b) = @_;
     my ($d) = (dirname($b));
-    my %ctx = ('rootdir' => $d."/../..");
+    my %ctx = ('rootdir' => $d."/../..",
+	       'menues' => [],
+	       'if' => [],
+	       'config' => [],
+	       'choice' => [] );
     print ("Load '$b' from $d\n");
     loadkconf(\%ctx,$b);
+    die("open menue\n") if (!(scalar(@{$$ctx{'menues'}}) == 0));
+    die("open if\n") if (!(scalar(@{$$ctx{'if'}}) == 0));
 }
 
 1;
