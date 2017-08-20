@@ -3,21 +3,34 @@
 $RE_string =                     qr{"((?:\\.|[^\\"])*)"};
 $RE_string_one =                 qr{'((?:\\.|[^\\'])*)'}; #"
 
-sub exprtoperlstr {
+sub splitexpr {
     my ($e) = @_;
+    if ($$e{'typ'}{'typ'} eq 'id' &&
+	$$e{'typ'}{'val'} eq 'if') {
+	return ($$e{'o'}[0],$$e{'o'}[1]);
+    }
+    return ($e,undef);
+}
+
+sub exprtoperlstr {
+    my ($ctx,$e) = @_;
     my $r = "";
     return "<none>" if (!defined($e));
     if ($$e{'typ'}{'typ'} eq 'id' &&
 	$$e{'typ'}{'val'} eq 'if') {
 	return
-	    exprtoperlstr($$e{'o'}[0])." if ".
-	    exprtoperlstr($$e{'o'}[1]) ;
+	    exprtoperlstr($ctx,$$e{'o'}[0])." if ".
+	    exprtoperlstr($ctx,$$e{'o'}[1]) ;
     }
     elsif ($$e{'typ'}{'typ'} eq 'id') {
 	if ($$e{'typ'}{'val'} eq 'y')    { return "'y'"; }
 	elsif ($$e{'typ'}{'val'} eq 'n') { return "'n'"; }
 	elsif ($$e{'typ'}{'val'} eq 'm') { return "'m'"; }
-	return '$$c{"'.$$e{'typ'}{'val'}.'"}';
+	else {
+	    my $id = $$e{'typ'}{'val'};
+	    $$ctx{'used'}{$id} = 1; 
+	    return '$$c{"'.$id.'"}';
+	}
     }
     elsif ($$e{'typ'}{'typ'} eq 'str') {
 	return "'".$$e{'typ'}{'val'}."'";
@@ -35,18 +48,17 @@ sub exprtoperlstr {
 	    $perlop = "eq";
 	}
 	return "(".
-	    exprtoperlstr($$e{'o'}[0])." $perlop ".
-	    exprtoperlstr($$e{'o'}[1]).")";
+	    exprtoperlstr($ctx,$$e{'o'}[0])." $perlop ".
+	    exprtoperlstr($ctx,$$e{'o'}[1]).")";
     }
     elsif ($$e{'typ'}{'typ'} eq '!') {
 	return '('.$$e{'typ'}{'typ'}.
-	    exprtoperlstr($$e{'o'}[0]).")";
+	    exprtoperlstr($ctx,$ctx,$$e{'o'}[0]).")";
     } else {
 	die ("Unknown ast ".Dumper($e));
     }
     return $r;
 }
-
 
 sub exprtostr {
     my ($e) = @_;
@@ -260,7 +272,6 @@ sub slurpone {
 	print ("  Parse option '$r'\n");
 	next if ($r =~ /^\s*$/);
 
-
 	if ($r =~ /^int\s+(.*)$/ ||
 	    $r =~ /^int\s*$/) {
 	    my ($val) = ($1);
@@ -355,11 +366,9 @@ sub slurpone {
 }
 
 
-
-
 sub loadkconf {
     my ($ctx,$fn) = @_;
-    print("$fn\n");
+    print(":::$fn\n");
     my $a = readfile($fn);
     $a =~ s/[\\]\n//g;
     #$a =~ s/[#][^\n]+//g;
