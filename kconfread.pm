@@ -29,7 +29,7 @@ sub exprtoperlstr {
 	else {
 	    my $id = $$e{'typ'}{'val'};
 	    $$ctx{'used'}{$id} = 1; 
-	    return '$$c{"'.$id.'"}';
+	    return 'get($ctx,"'.$id.'")';
 	}
     }
     elsif ($$e{'typ'}{'typ'} eq 'str') {
@@ -61,17 +61,24 @@ sub exprtoperlstr {
 }
 
 sub exprtostr {
-    my ($e) = @_;
+    my ($ctx,$e) = @_;
     my $r = "";
     return "<none>" if (!defined($e));
     if ($$e{'typ'}{'typ'} eq 'id' &&
 	$$e{'typ'}{'val'} eq 'if') {
 	return
-	    exprtostr($$e{'o'}[0])." if ".
-	    exprtostr($$e{'o'}[1]) ;
+	    exprtostr($ctx,$$e{'o'}[0])." if ".
+	    exprtostr($ctx,$$e{'o'}[1]) ;
     }
     elsif ($$e{'typ'}{'typ'} eq 'id') {
-	return $$e{'typ'}{'val'};
+	if ($$e{'typ'}{'val'} eq 'y')    { return "'y'"; }
+	elsif ($$e{'typ'}{'val'} eq 'n') { return "'n'"; }
+	elsif ($$e{'typ'}{'val'} eq 'm') { return "'m'"; }
+	else {
+	    my $id = $$e{'typ'}{'val'};
+	    $$ctx{'used'}{$id} = 1; 
+	    return $$e{'typ'}{'val'};
+	}
     }
     elsif ($$e{'typ'}{'typ'} eq 'str') {
 	return "'".$$e{'typ'}{'val'}."'";
@@ -82,12 +89,12 @@ sub exprtostr {
 	   $$e{'typ'}{'typ'} eq '==' ||
 	   $$e{'typ'}{'typ'} eq '=') {
 	return "(".
-	    exprtostr($$e{'o'}[0]).$$e{'typ'}{'typ'}.
-	    exprtostr($$e{'o'}[1]).")";
+	    exprtostr($ctx,$$e{'o'}[0]).$$e{'typ'}{'typ'}.
+	    exprtostr($ctx,$$e{'o'}[1]).")";
     }
     elsif ($$e{'typ'}{'typ'} eq '!') {
 	return '('.$$e{'typ'}{'typ'}.
-	    exprtostr($$e{'o'}[0]).")";
+	    exprtostr($ctx,$$e{'o'}[0]).")";
     } else {
 	die ("Unknown ast ".Dumper($e));
     }
@@ -248,15 +255,35 @@ sub parseguart {
     $guard =~ s/[#].*$//g;
     if ($guard =~ /^\s*if (.*)$/) {
 	my $e = parseexpr($ctx, $1);
-	print ("  # expr: ".exprtostr($e)."\n");
+	print ("  # expr: ".exprtostr($ctx,$e)."\n");
     } elsif ($guard =~ /^\s*$/) {
     } else {
 	die("Cannot parse select options '$guard'");
     }
 }
 
+sub depend_inherit {
+    my ($ctx) = @_;
+    my $size = scalar(@{$$ctx{'menues'}});
+    return undef if ($size == 0);
+    return $$ctx{'menues'}[$size-1];
+}
+
+sub sum_inherit {
+    my ($e) = @_;
+    my @r = @{$$e{'depends'}};
+    if (defined($$e{'depends_inherit'})) {
+	my $n = sum_inherit($$e{'depends_inherit'});
+	push(@r, @{$n});
+    }
+    #print (Dumper(\@r));
+    return [grep { defined($_) } @r];
+}
+
 sub slurpone {
     my ($ctx,$a,$ctxone) = @_;
+    
+    $$ctxone{'depends_inherit'} = depend_inherit($ctx);
     $$ctxone{'depends'} = [];
     $$ctxone{'default'} = [];
     $$ctxone{'select'} = [];
@@ -280,21 +307,21 @@ sub slurpone {
 	    my ($n) = $1;
 	    die ("type already defined : >$$ctxone{'typ'}< ") if (defined($$ctxone{'typ'}) && !($$ctxone{'typ'} eq 'int'));
 	    $$ctxone{'typ'} = 'int';
-	    $$ctxone{'id'} = $n if (length($n));
+	    $$ctxone{'id'} = $n if (length($$ctxone{'id'}) == 0 && length($n));
 	    
 	    my ($val) = ($1);
 	    my $e = parseexpr($ctx, $val);
-	    print ("  # expr-int: ".exprtostr($e)."\n");
+	    print ("  # expr-int: ".exprtostr($ctx,$e)."\n");
 	}
 	elsif ($r =~ /^hex\s+(.*)$/ ||
 	       $r =~ /^hex\s*$/) {
 	    my ($n) = $1;
 	    die ("type already defined : >$$ctxone{'typ'}< ") if (defined($$ctxone{'typ'}) && !($$ctxone{'typ'} eq 'hex'));
 	    $$ctxone{'typ'} = 'hex';
-	    $$ctxone{'id'} = $n if (length($n));
+	    $$ctxone{'id'} = $n if (length($$ctxone{'id'}) == 0 && length($n));
 	    my ($val) = ($1);
 	    my $e = parseexpr($ctx, $val);
-	    print ("  # expr-hex: ".exprtostr($e)."\n");
+	    print ("  # expr-hex: ".exprtostr($ctx,$e)."\n");
 
 	}
 	elsif ($r =~ /^bool\s+(.*)$/ ||
@@ -303,9 +330,9 @@ sub slurpone {
 	    die ("type already defined : >$$ctxone{'typ'}< ") if (defined($$ctxone{'typ'}) && !($$ctxone{'typ'} eq 'bool'));
 	    $$ctxone{'typ'} = 'bool';
 	    my ($val) = ($1);
-	    $$ctxone{'id'} = $n if (length($n));
+	    $$ctxone{'id'} = $n if (length($$ctxone{'id'}) == 0 && length($n));
 	    my $e = parseexpr($ctx, $val);
-	    print ("  # expr-bool: ".exprtostr($e)."\n");
+	    print ("  # expr-bool: ".exprtostr($ctx,$e)."\n");
 
 	}
 	elsif ($r =~ /^tristate\s+(.*)$/ ||
@@ -313,10 +340,10 @@ sub slurpone {
 	    my ($n) = $1;
 	    die ("type already defined : >$$ctxone{'typ'}< ") if (defined($$ctxone{'typ'}) && !($$ctxone{'typ'} eq 'tristate'));
 	    $$ctxone{'typ'} = 'tristate';
-	    $$ctxone{'id'} = $n if (length($n));
+	    $$ctxone{'id'} = $n if (length($$ctxone{'id'}) == 0 && length($n));
 	    my ($val) = ($1);
 	    my $e = parseexpr($ctx, $val);
-	    print ("  # expr-tristate: ".exprtostr($e)."\n");
+	    print ("  # expr-tristate: ".exprtostr($ctx,$e)."\n");
 
 	}
 	elsif ($r =~ /^string\s+(.*)/ || 
@@ -324,13 +351,14 @@ sub slurpone {
 	    my ($n) = $1;
 	    die ("type already defined : >$$ctxone{'typ'}< ") if (defined($$ctxone{'typ'}) && !($$ctxone{'typ'} eq 'string'));
 	    $$ctxone{'typ'} = 'string';
-	    $$ctxone{'id'} = $n if (length($n));
+	    $$ctxone{'id'} = $n if (length($$ctxone{'id'}) == 0 && length($n));
 	    my ($val) = ($1);
 	    my $e = parseexpr($ctx, $val);
-	    print ("  # expr-string: ".exprtostr($e)."\n");
+	    print ("  # expr-string: ".exprtostr($ctx,$e)."\n");
 	}
 	elsif ($r =~ /^prompt(.*)/) {
-	    $$ctxone{'id'} = $1;
+	    
+	    $$ctxone{'id'} = $1 if (length($$ctxone{'id'}) == 0);
 	}
 
 	elsif ($r =~ /^default(.*)/) {
@@ -340,13 +368,13 @@ sub slurpone {
 	}
 	elsif ($r =~ /^depends\s+on\s+(.*)$/) {
 	    my $e = parseexpr($ctx, $1);
-	    print ("  # expr-depends: ".exprtostr($e)."\n");
+	    print ("  # expr-depends: ".exprtostr($ctx,$e)."\n");
 	    push(@{$$ctxone{'depends'}}, $e);
 	}
 	elsif ($r =~ /^select(.*)$/) {
 	    my ($g) = ($1);
 	    my $e = parseexpr($ctx, $g);
-	    print ("  # expr-select: ".exprtostr($e)."\n");
+	    print ("  # expr-select: ".exprtostr($ctx,$e)."\n");
 	    push(@{$$ctxone{'select'}}, $e);
 	}
 
@@ -366,12 +394,12 @@ sub slurpone {
 	elsif ($r =~ /^def_bool\s+(.*)$/) {
 	    my ($id) = ($1);
 	    my $e = parseexpr($ctx, $id);
-	    print ("  # expr-def-bool: ".exprtostr($e)."\n");
+	    print ("  # expr-def-bool: ".exprtostr($ctx,$e)."\n");
 	}
 	elsif ($r =~ /^def_tristate\s+(.*)/) {
 	    my ($id) = ($1);
 	    my $e = parseexpr($ctx, $id);
-	    print ("  # expr-def-tristate: ".exprtostr($e)."\n");
+	    print ("  # expr-def-tristate: ".exprtostr($ctx,$e)."\n");
 	}
 	elsif ($r =~ /^visible/) {
 	}
@@ -406,10 +434,12 @@ sub loadkconf {
 
 	print (" Parse '$l'\n");
 	
-	if ($l =~ /^config\s+($id)\s*$/ ||
-	    $l =~ /^config\s*$/) {
-	    my ($n) = ($1);
-	    my $c = {'id' => $n, 'options' => []};
+	if ($l =~ /^(config)\s+($id)\s*$/ ||
+	    $l =~ /^(config)\s*$/ ||
+	    $l =~ /^(menuconfig)\s+($id)\s*$/ ||
+	    $l =~ /^(menuconfig)\s*$/) {
+	    my ($conftype, $n) = ($1,$2);
+	    my $c = {'id' => $n, 'options' => [], 'conftype' => $conftype};
 	    my $o = slurpone($ctx,\@a, $c);
 	    push(@{$$ctx{'config'}},$c);
 	    
@@ -419,12 +449,32 @@ sub loadkconf {
 
 	} elsif ($l =~ /^menu\s+"(.+)"$/) {
 	    my ($n) = ($1);
-	    my $c = {'id' => $n, 'options' => []};
+	    my $c = {'typ'=>'menue', 'id' => $n, 'options' => []};
 	    my $o = slurpone($ctx,\@a,$c);
+	    
 	    push(@{$$ctx{'menues'}},$c);;
 	    
 	} elsif ($l =~ /^endmenu/) {
-	    die("Endmenue without menue in '$fn'\n") if (scalar(@{$$ctx{'menues'}}) == 0);
+	    my $size = scalar(@{$$ctx{'menues'}});
+	    die("endmenu without menu\n") if ($size == 0 ||
+					      $$ctx{'menues'}[$size-1]{'typ'} ne 'menue');
+	    pop(@{$$ctx{'menues'}});;
+	    
+	} elsif ($l =~ /^if\s*(.*)/) {
+	    my ($right) = ($1);
+	    my $e = parseexpr($ctx, $right);
+
+	    my $c = {'typ'=>'if', 'id' => $n, 'depends' => [$e], 'depends_inherit'=>depend_inherit($ctx) };
+	    
+	    push(@{$$ctx{'menues'}},$c);;
+	    
+	} elsif ($l =~ /^endif/) {
+
+
+	    
+	    my $size = scalar(@{$$ctx{'menues'}});
+	    die("endif without if\n") if ($size == 0 ||
+					  $$ctx{'menues'}[$size-1]{'typ'} ne 'if');
 	    pop(@{$$ctx{'menues'}});;
 	    
 	} elsif ($l =~ /^menuconfig/) {
@@ -438,13 +488,6 @@ sub loadkconf {
 	} elsif ($l =~ /^endchoice/) {
 	    die("Endchoice without choice in '$fn'\n") if (scalar(@{$$ctx{'choice'}}) == 0);
 	    pop(@{$$ctx{'choice'}});;
-	    
-	} elsif ($l =~ /^if/) {
-	    my $e = parseguart($ctx, $l);
-	    push(@{$$ctx{'if'}},$e);;
-	    
-	} elsif ($l =~ /^endif/) {
-	    die("endif without if\n") if (scalar(@{$$ctx{'if'}}) == 0);
 	    
 	} elsif ($l =~ /^\s*#.*/) {
 	} elsif ($l =~ /^\s*comment/) {
@@ -462,11 +505,43 @@ sub parsekconf {
 	       'menues' => [],
 	       'if' => [],
 	       'config' => [],
-	       'choice' => [] );
+	       'choice' => [],
+	       'namespace' => {}
+	);
+    my $ctx = \%ctx;
     print ("Load '$b' from $d\n");
     loadkconf(\%ctx,$b);
     die("open menue\n") if (!(scalar(@{$$ctx{'menues'}}) == 0));
     die("open if\n") if (!(scalar(@{$$ctx{'if'}}) == 0));
+    my %k = ();
+    map { $k{$$_{'id'}} = $_; } @{$ctx{'config'}};
+
+    foreach my $k (sort(keys(%k))) {
+	my ($n) = ($k);
+	my $c = $k{$n};
+	print($n.":\n"); 
+	my $e = sum_inherit($c);
+	#print (Dumper($k{$n}));
+	$$ctx{'used'} = {};
+	foreach my $a (@$e) {
+	    #print (":".Dumper($a));
+	    print (" +  :".exprtostr($ctx,$a)."\n"); 
+	};
+	foreach my $a (@{$$c{'depends'}}) {
+	    print (" ++ :".exprtostr($ctx,$a)."\n"); 
+	}
+	my @dep = sort(keys(%{$$ctx{'used'}}));
+	print("  => ".join(",",@dep)."\n");
+	my @missdep = ();
+	foreach my $d (@dep) {
+	    if(!defined($k{$d})) {
+		push(@missdep,$d);
+	    }
+	};
+	print("  -  ".join(",",@missdep)."\n") if (scalar(@missdep));
+    };
+    $ctx{'namespace'} = \%k;
+    return \%ctx;
 }
 
 1;
